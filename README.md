@@ -1,14 +1,17 @@
-# Getting familiar with SQS and NodeJS
-This is a short workshop about AWS SQS in NodeJS that helps you become familiar with SQS management from NodeJS Using the AWS SDK library.
+# Getting familiar with SQS and SNS using NodeJS
+This is a short workshop about AWS SQS and SNS in NodeJS that helps you become familiar with both tools from NodeJS Using the AWS SDK library.
 
 ## Prerequisites
+
 To be able to run this workshop, the following tools/facilities are required:
 1. A Unix-like environment. If your PC is Linux or Mac, you are all set! if you use Windows, we recommend to [install WSL2](https://learn.microsoft.com/en-us/windows/wsl/install). You can also spin up a Linux VM machine or even run everything on a Linux container.
 2. AWS CLI installed on your environment. Here is an [installation guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html).
 3. AWS ACCESS and SECRET keys configured. [Creation guide](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey).
 4. NodeJS and NPM installed.
 
-## Creating an SQS queue in Amazon
+## 1. Amazon Simple Queue Service (SQS)
+
+### Creating an SQS queue in the Amazon Console
 For creating a new queue, you have to follow the next steps: 
 
 1. Open the [Amazon SQS console](https://console.aws.amazon.com/sqs/)
@@ -21,7 +24,7 @@ Finally, Amazon SQS creates the queue and displays the queue's details page. Her
 
 ![AWS SQS Queue description](./assets/sample-sqs-creation.png)
 
-## Getting started
+### Getting started
 
 In this section, you are going to use NodeJS, SQS, and AWS-SDK for javascript which is a library provided by Amazon to interact with its services.
 
@@ -305,7 +308,7 @@ npm run sendMessage
 npm run getQueueAttributes
 ~~~
 
-After running the previous command, you'll see a property called **ApproximateNumberOfMessages**. If its value is 1, it means there's one message waiting in the queue. You can also verify this information by checking the queue details on the Amazon SQS console.
+After running the previous commands, you'll see a property called **ApproximateNumberOfMessages**. If its value is 1, it means there's one message waiting in the queue. You can also verify this information by checking the queue details on the Amazon SQS console.
 
 ~~~JSON
 {
@@ -520,6 +523,222 @@ After running the previous command, you'll see a property called `ApproximateNum
 }
 ~~~
 
+## 2. Amazon Simple Notification Service (SNS)
+
+### Configure SNS-related resources in the Amazon Console
+For creating a new topic, you have to follow the next steps: 
+
+1. Open the [Amazon SNS console](https://us-west-1.console.aws.amazon.com/sns/v3/home?region=us-west-1#/topics)
+2. Choose **Create topic**
+3. Change the topic type to Standard as we did with the SQS queue (You can't change topic type after you have created it)
+4. Enter a Name for your topic
+5. Create the topic with the default parameters, so, scroll to the bottom and choose **Create topic**
+
+Finally, Amazon SNS creates the topic and displays the topic's details page. Here we have the following information.
+
+![AWS SNS topic description](./assets/sample-sns-creation.png)
+
+6. Head to the subscriptions tab as shown on the image below and Click on **Create subscription**.
+
+![AWS SNS subs list](./assets/sample-sns-subs-list.png)
+
+7. In the **Topic ARN** field, Choose the topic ARN of the topic you just created. **Note:** the Amazon Resource Name (ARN) is a unique ID associated to every resource created in amazon. You can find it on the every resource's description tab.
+8. In the **Protocol** field, choose **Amazon SQS**.
+9. In the **Endpoint** field, choose the SQS queue we created in [this section](#creating-an-sqs-queue-in-the-amazon-console)
+10. Check the button **Enable raw message delivery**.
+11. Click on **Create subscription**.
+
+Finally, Amazon SNS creates the subscription and displays its details page. Here we have the following information.
+
+![AWS SNS subs description](./assets/sample-sns-subs-desc.png)
+
+12. Let's create a second subscription but change the following fields:
+  - In the **Protocol** field, choose **SMS**.
+  - As we are using a sandbox account (free tier), we will need to verify the ownership of our number. Before choosing the Endpoint, Click on Add number > enter your phone number > choose your preferred language > click on **Add phone number**. Then confirm the code that you will receive via SMS. 
+  - In the **Endpoint** field, enter the country code followed by your phone number like this: for Colombia the code is +57 and my number is 3124567890, an example can be: +573124567890.
+13. Click on **Create subscription**.
+14. Go back to the [Amazon SQS console](https://console.aws.amazon.com/sqs/). And, enter your queue's main page.
+15. Click on **Access policy** > **Edit** as shown on the following image.
+![AWS SQS access policy](./assets/sample-sqs-change-access-policy.png)
+1.  Change the JSON-formatted policy with the following one. **NOTE**: Replace the values `YOUR_QUEUE_ARN` and `YOUR_TOPIC_ARN` with the queue and topic ARNs respectively. Again, those can be found on each resource's description page:
+~~~JSON
+{
+  "Version": "2012-10-17",
+  "Id": "__default_policy_ID",
+  "Statement": [
+    {
+      "Sid": "__owner_statement",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::961518039473:root"
+      },
+      "Action": "SQS:*",
+      "Resource": "YOUR_QUEUE_ARN"
+    },
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "sns.amazonaws.com"
+      },
+      "Action": "sqs:SendMessage",
+      "Resource": "YOUR_QUEUE_ARN",
+      "Condition": {
+        "ArnEquals": {
+          "aws:SourceArn": "YOUR_TOPIC_ARN"
+        }
+      }
+    }
+  ]
+}
+~~~
+**Note:** This policy controls who can access the queue, with this change we are adding a second statement that allows the SNS topic to send messages to the SQS queue.
+
+### Getting started
+In this section, you are going to add a last command to the list of methods that we previously used to interact with SQS. But this time, we will interact with the SNS service instead.
+
+
+In your environment, go to the NodeJS project that we named **sqsnodejs**. We need also the following library, let's install it:
+
+~~~bash
+npm i -S @aws-sdk/client-sns 
+~~~
+**Note**: `@aws-sdk/client-sns` will ease the interaction with Amazon SNS API as well as it happens with the SQS one.
+
+Now, it's a good idea to create a separate file called `SNSHelper.js` where you'll gather all the functions related to SNS. You are free to order your code as you prefer, but we think separating each service's helper is better:
+
+~~~JavaScript
+const {
+  SNSClient
+} = require("@aws-sdk/client-sns");
+
+class SNSHelper {
+  constructor() {
+    this.snsClient = new SNSClient();
+  }
+}
+
+module.exports = SNSHelper;
+~~~
+
+**Note**: When SNSClient is initialized, it also takes environment variables and connects to Amazon SNS due to the `dotenv` library and [credentials setup](#setting-up-the-aws-credentials) we did for the SQS part.
+
+### Publishing messages in the SNS topic
+
+Now, you created an SNSHelper class and its constructor initialized a SNSClient which will interact with Amazon SNS. Next, let's create a method to publish messages in the topic, in the SNSHelper file add the following code:
+
+~~~JavaScript
+const {
+  SNSClient,
+  PublishCommand
+} = require("@aws-sdk/client-sns");
+
+class SNSHelper {
+  constructor() {
+    this.snsClient = new SNSClient();
+  }
+
+  publishMessage(params) {
+    return this.snsClient.send(new PublishCommand(params));
+  }
+}
+
+module.exports = SNSHelper;
+~~~
+
+We've added a new command called **PublishCommand** from the `@aws-sdk/client-sns package`. This command lets you publish a message to an SNS topic.
+
+Create a new file named `publishMessage.js` in your main project folder and add the following code:
+
+~~~JavaScript
+require("dotenv").config();
+const SNSHelper = require("./SNSHelper");
+
+(async () => {
+  const sns = new SNSHelper();
+  const params = {
+    TopicArn: "[YOUR TOPIC ARN]",
+    MessageStructure: "json",
+    Message: JSON.stringify({
+      default: "This is a test message",
+      sqs: "Hey! SQS, process this.",
+      sms: "ALERT: SQS has been notified about the message."
+    }),
+  };
+  console.log(await sns.publishMessage(params));
+})();
+~~~
+
+To use this command, you'll need to replace the string `"[YOUR TOPIC ARN]"` with the SNS topic's ARN. You could simply send a single string as message that would be propagated to all the subscribers, but let's test how powerful this service can be. If we set the `MessageStructure` as **"json"**, we can then specify the custom message each subscriber type should receive. Remember we subscribed 2 different consumers (an SQS queue and a phone number for SMS). A default message must be also set, in case we have a different subscriber that is not customized.
+
+For more details on additional parameters you can use, check [this link](https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/SNS.html#publish-property).
+
+Now, let's test this command. Add a new script called `publishMessage`  to your `package.json` file. Your Scripts section of the package.json file should look like this:
+
+~~~JSON
+{
+  ...
+  "scripts": {
+    "listQueues": "node listQueues",
+    "getQueueAttributes": "node getQueueAttributes",
+    "sendMessage": "node sendMessage",
+    "receiveMessage": "node receiveMessage",
+    "deleteMessage": "node deleteMessage",
+    "publishMessage": "node publishMessage"
+  },
+  ...
+}
+~~~
+
+Now run the next command:
+
+~~~Bash
+npm run publishMessage
+~~~
+
+At this point, you published your first notification. The topic will proceed to propagate each custom message to the corresponding subscribers. The following two consequential actions will happen:
+1. You must have received an SMS in your registered phone.
+2. A new message has been pushed to the registered SQS queue.
+
+Let's test how true that is. Let's first check the queue's attributes and then retrieve the message from the queue using the commands that we built for the first stage:
+
+~~~Bash
+npm run getQueueAttributes
+npm run receiveMessage
+~~~
+
+The first command should get the property called **ApproximateNumberOfMessages** with the modified count of messages in the queue. The last one, should bring the message we published to the SNS topic and should look like this:
+
+~~~JSON
+{
+  '$metadata': {
+    httpStatusCode: 200,
+    requestId: '6fab1835-0abe-54b9-a73d-4752b5b8e4be',
+    extendedRequestId: undefined,
+    cfId: undefined,
+    attempts: 1,
+    totalRetryDelay: 0
+  },
+  Messages: [
+    {
+      Body: 'Hey! SQS, process this.',
+      MD5OfBody: '6478b72fc8d2f49a22027ed9a1ec4f03',
+      MessageId: 'ec9b06e3-b882-4c6f-9912-374fc339022a',
+      ReceiptHandle: 'AQEBlfh1o/98TAE7P4WLDV3gW2t1OxMc2u+0CGAIWpztLRwRamKeu+ni65q/rQEa2pIwskm2OJ8mK8bDcCAuWYjrumt0E025R5/q1FZlB7DCFplZi9s7IKQnycd0+igco9JBgZYz5hnEqSCZ5oTlPT7MhKEm/KM84ICwAKlD/POT5zmcEXKOwWydL0Q6WPCfuMAcXtDjmSLJv6CVlnoU8kFZ92mGts3EcEcoRg/dEDjYPGRnUvOXJQm4ftzC/fr0C6iSwDkmDZtLXpAZVB6HEIGOjQPNYUY406wCAecFYri0LRGWLg0GwiXi8/JTpvXRhtXhEcBOP3W7IVZD6zRClFLcbQKu9zGmUTuq3MLX4V7F4zjOoOYv/IwYfd8EPG0HlziFt/rfRH15YuHMoylON+cwo23HuFEa5I8hnAgGDvMasjddjk='
+    }
+  ]
+}
+~~~
+
+Notice that the message **body** has the actual string we published using the `publishMessage` command.
+
+### Do it your-self
+What if we build some other cool commands for the remaining actions to work with SNS? Here are some ideas to dig into the rest of the SDK:
+- listTopics
+- listSubscriptions
+- getTopicAttributes
+- publishBatch
+
 ## Conclusion
 
-We've covered some fundamental methods for using Amazon SQS with Node.js. However, there are many more methods available that weren't discussed in this Workshop. Now that you have a basic understanding, you can explore the [Amazon SQS documentation](https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/client/sqs/) for more in-depth information.
+We've covered some fundamental methods for using Amazon SQS and SNS with Node.js. However, there are many more methods available that weren't discussed in this Workshop. Now that you have a basic understanding, you can explore the [Amazon SQS documentation](https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/client/sqs/) and [Amazon SNS documentation](https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/client/sns/) for more in-depth information.
+
