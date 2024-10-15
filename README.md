@@ -55,7 +55,7 @@ The easiest way to connect your project to AWS is by using environment variables
 ~~~config
 AWS_ACCESS_KEY_ID=[YOUR_AWS_ACCESS_KEY_ID]
 AWS_SECRET_ACCESS_KEY=[YOUR_AWS_SECRET_ACCESS_KEY]
-AWS_DEFAULT_REGION=[YOUR_AWS_DEFAULT_REGION]
+AWS_REGION=[YOUR_AWS_REGION]
 ~~~
 
 **Note**: you have to change values in brackets with your credentials from AWS. If you don't know how to get this information, head to the [prerequisites section](#prerequisites).
